@@ -7,22 +7,24 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install NDK
         run: |
           sudo apt update
           sudo apt install -y unzip wget
           wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
           unzip android-ndk-r26d-linux.zip
-          echo "NDK_HOME=$PWD/android-ndk-r26d" >> $GITHUB_ENV
-          echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26d" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          NDK="$PWD/android-ndk-r26d"
+          echo "NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$NDK" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$NDK" >> $GITHUB_ENV
+
+          # verifica qual prebuilt existe
+          ls $NDK/toolchains/llvm/prebuilt/
 
       - name: Install Rust
-        run: |
-          rustup target add aarch64-linux-android
-          rustup component add rust-src
+        run: rustup target add aarch64-linux-android
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
@@ -30,11 +32,50 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt install -y \
-            pkg-config cmake clang clang++ python3 \
+            pkg-config cmake clang python3 \
             ninja-build curl git unzip \
-            libfontconfig1-dev libfreetype-dev \
-            zlib1g-dev libpng-dev libexpat1-dev
+            zlib1g-dev libpng-dev
 
+          # gn para ARM64
+          wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-arm64/+/latest -O gn.zip
+          unzip gn.zip -d gn-bin
+          sudo mv gn-bin/gn /usr/local/bin/gn
+          sudo chmod +x /usr/local/bin/gn
+          gn --version
+
+      - name: Configure cargo for Android
+        run: |
+          # detecta o prebuilt correto dinamicamente
+          PREBUILT=$(ls $NDK_HOME/toolchains/llvm/prebuilt/ | head -1)
+          TOOLCHAIN="$NDK_HOME/toolchains/llvm/prebuilt/$PREBUILT/bin"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << EOF
+          [target.aarch64-linux-android]
+          linker = "$TOOLCHAIN/aarch64-linux-android21-clang"
+          ar = "$TOOLCHAIN/llvm-ar"
+          EOF
+
+      - name: Build
+        run: |
+          export PATH=$TOOLCHAIN:$PATH
+          cargo ndk -t arm64-v8a --platform 21 build --release
+        env:
+          ANDROID_NDK: ${{ env.NDK_HOME }}
+          ANDROID_NDK_HOME: ${{ env.NDK_HOME }}
+          ANDROID_NDK_ROOT: ${{ env.NDK_HOME }}
+          RUST_BACKTRACE: "1"
+          SKIA_GN_COMMAND: gn
+          SKIA_NINJA_COMMAND: ninja
+          CC: ${{ env.TOOLCHAIN }}/aarch64-linux-android21-clang
+          CXX: ${{ env.TOOLCHAIN }}/aarch64-linux-android21-clang++
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: neovide-android-arm64
+          path: target/aarch64-linux-android/release/neovide
           # instala gn
           wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-arm64/+/latest -O gn.zip
           unzip gn.zip -d gn-bin
