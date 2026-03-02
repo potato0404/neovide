@@ -15,9 +15,14 @@ jobs:
           wget https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
           unzip android-ndk-r26d-linux.zip
           echo "NDK_HOME=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r26d" >> $GITHUB_ENV
 
       - name: Install Rust
-        run: rustup target add aarch64-linux-android
+        run: |
+          rustup target add aarch64-linux-android
+          rustup component add rust-src
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
@@ -25,16 +30,40 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt install -y \
-            pkg-config cmake clang python3 ninja-build
+            pkg-config cmake clang clang++ python3 \
+            ninja-build curl git unzip \
+            libfontconfig1-dev libfreetype-dev \
+            zlib1g-dev libpng-dev libexpat1-dev
+
+          # instala gn
+          wget https://chrome-infra-packages.appspot.com/dl/gn/gn/linux-arm64/+/latest -O gn.zip
+          unzip gn.zip -d gn-bin
+          sudo mv gn-bin/gn /usr/local/bin/gn
+          sudo chmod +x /usr/local/bin/gn
+
+      - name: Configure cargo for Android
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << EOF
+          [target.aarch64-linux-android]
+          linker = "${{ env.NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          ar = "${{ env.NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          EOF
 
       - name: Build
         run: |
-          cargo ndk -t arm64-v8a build --release
+          export PATH=${{ env.NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+          cargo ndk -t arm64-v8a --platform 21 build --release
         env:
+          ANDROID_NDK: ${{ env.NDK_HOME }}
           ANDROID_NDK_HOME: ${{ env.NDK_HOME }}
-          SKIA_BINARIES_URL: https://github.com/rust-skia/skia-binaries/releases/download
-          SKIA_BINARIES_TAG: "0.93.0"
-
+          ANDROID_NDK_ROOT: ${{ env.NDK_HOME }}
+          RUST_BACKTRACE: "1"
+          SKIA_GN_COMMAND: gn
+          SKIA_NINJA_COMMAND: ninja
+          CC: ${{ env.NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          CXX: ${{ env.NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++
+          
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
